@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#101827">
+<title>Block Vibe</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#101827;color:#fff;font-family:Arial,sans-serif}
+.app{max-width:460px;margin:auto;padding:18px 12px}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+h1{font-size:27px;margin:0;font-weight:900}h1 span{color:#65e0b2}
+.tag{font-size:11px;color:#9eacc1;background:#1d2b40;padding:7px;border-radius:20px}
+.stats{display:flex;gap:10px;margin-bottom:15px}
+.stat{flex:1;background:#1d2b40;padding:12px;border-radius:14px}
+.stat small{display:block;color:#9eacc1;font-size:11px;margin-bottom:5px}
+.stat strong{font-size:25px;font-variant-numeric:tabular-nums}
+.board-wrap{background:#1b293e;padding:7px;border-radius:15px;border:1px solid #34445d}
+#board{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px;touch-action:none}
+.cell{aspect-ratio:1;min-width:0;border-radius:5px;background:#2b3b52;border:0;padding:0;touch-action:none}
+.cell.filled{box-shadow:inset 0 -3px #0002}
+.cell.preview-good{background:#397d70!important;outline:2px solid #65e0b2;outline-offset:-2px}
+.cell.preview-bad{background:#713849!important;outline:2px solid #ff657a;outline-offset:-2px}
+.label{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#aab8ca;margin:19px 2px 9px}
+.pieces{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.slot{height:112px;min-width:0;background:#1b293e;border:2px solid transparent;border-radius:13px;display:flex;align-items:center;justify-content:center;touch-action:none;user-select:none;-webkit-user-select:none}
+.slot.selected{border-color:#65e0b2}.slot.used{opacity:.2}
+.shape{display:grid;gap:4px;pointer-events:none}
+.mini{width:clamp(13px,4.5vw,20px);height:clamp(13px,4.5vw,20px);border-radius:4px;pointer-events:none}
+.help{color:#9eacc1;font-size:12px;line-height:1.5;text-align:center;margin:13px 3px}
+#message{min-height:17px;text-align:center;color:#65e0b2;font-size:13px}
+.actions{display:flex;gap:9px;margin-top:10px}
+.actions button{flex:1;border:0;border-radius:12px;padding:14px 5px;font-size:14px;font-weight:bold;background:#65e0b2;color:#10221c}
+.actions button:last-child{background:#293950;color:#fff}
+.overlay{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:20px;z-index:10}
+.overlay.show{display:flex}
+.modal{background:#1d2b40;padding:25px;border-radius:20px;width:100%;max-width:320px;text-align:center;border:1px solid #40516b}
+.modal p{color:#aab8ca;line-height:1.5}.modal button{background:#65e0b2;border:0;padding:13px 20px;border-radius:10px;font-weight:bold}
+#dragGhost{position:fixed;z-index:20;display:none;pointer-events:none;opacity:.96;filter:drop-shadow(0 8px 12px #0006)}
+.ghost-grid{display:grid;gap:4px}
+.ghost-cell{width:clamp(20px,6vw,28px);height:clamp(20px,6vw,28px);border-radius:5px}
+@media(min-width:420px){.app{padding-top:24px}.slot{height:125px}.cell{border-radius:7px}}
+</style>
+</head>
+<body>
+<main class="app">
+<header><h1>BLOCK <span>VIBE</span></h1><div class="tag">BLOCK PUZZLE</div></header>
+<section class="stats">
+<div class="stat"><small>ТЕКУЩИЕ ОЧКИ</small><strong id="score">0</strong></div>
+<div class="stat"><small>РЕКОРД</small><strong id="best">0</strong></div>
+</section>
+<div class="board-wrap"><div id="board"></div></div>
+<div class="label"><strong>ТВОИ ФИГУРЫ</strong><span>Перетащи на поле ↓</span></div>
+<section class="pieces" id="pieces"></section>
+<div id="message"></div>
+<p class="help">Перетаскивай фигуры пальцем на поле. Заполняй целые строки и столбцы, чтобы очищать блоки и набирать очки.</p>
+<div class="actions"><button id="restart">↻ Новая игра</button><button id="rules">Как играть?</button></div>
+</main>
+<div id="dragGhost"><div class="ghost-grid" id="ghostGrid"></div></div>
+<div class="overlay" id="overlay"><div class="modal"><h2 id="modalTitle">Игра окончена!</h2><p id="modalText"></p><button id="again">Играть снова</button></div></div>
+<script>
+(()=>{
+'use strict';
+const SIZE=8;
+const COLORS=['#57c7ff','#ffbd59','#a78bfa','#65e0b2','#ff7896','#f27dff','#f5df67'];
+const SHAPES=[
+[[0,0]],[[0,0],[0,1]],[[0,0],[1,0]],[[0,0],[0,1],[0,2]],[[0,0],[1,0],[2,0]],
+[[0,0],[1,0],[0,1],[1,1]],[[0,0],[0,1],[1,1],[2,1]],[[0,1],[1,0],[1,1],[1,2]],
+[[0,0],[1,0],[2,0],[2,1]],[[0,0],[1,0],[1,1]],[[0,0],[0,1],[0,2],[0,3]],
+[[0,0],[1,0],[2,0],[3,0]],[[0,0],[0,1],[0,2],[1,0],[1,1],[1,2]],
+[[0,0],[1,0],[2,0],[0,1],[1,1],[2,1]],[[0,0],[1,0],[2,0],[2,1],[2,2]],
+[[0,0],[0,1],[1,1],[1,2]],[[0,0],[1,0],[2,0],[0,1]],[[0,0],[0,1],[0,2],[1,2]]
+];
+const boardEl=document.getElementById('board'),piecesEl=document.getElementById('pieces');
+const scoreEl=document.getElementById('score'),bestEl=document.getElementById('best');
+const message=document.getElementById('message'),ghost=document.getElementById('dragGhost');
+const ghostGrid=document.getElementById('ghostGrid');
+let grid=[],pieces=[],score=0,best=0,selected=-1,ended=false,drag=null;
+try{best=Number(localStorage.getItem('blockVibeBest'))||0}catch(e){}
+bestEl.textContent=best;
+function randomPiece(){return{shape:SHAPES[Math.floor(Math.random()*SHAPES.length)],color:COLORS[Math.floor(Math.random()*COLORS.length)],used:false}}
+function newGame(){
+ cancelDrag();grid=Array.from({length:SIZE},()=>Array(SIZE).fill(''));
+ pieces=[randomPiece(),randomPiece(),randomPiece()];score=0;selected=-1;ended=false;message.textContent='';
+ document.getElementById('overlay').classList.remove('show');document.getElementById('again').textContent='Играть снова';render();
+}
+function render(){
+ boardEl.innerHTML='';
+ for(let r=0;r<SIZE;r++)for(let c=0;c<SIZE;c++){
+  const cell=document.createElement('div');cell.className='cell';cell.dataset.r=r;cell.dataset.c=c;
+  if(grid[r][c]){cell.classList.add('filled');cell.style.background=grid[r][c]}
+  boardEl.appendChild(cell);
+ }
+ piecesEl.innerHTML='';
+ pieces.forEach((p,i)=>{
+  const slot=document.createElement('div');slot.className='slot'+(selected===i?' selected':'')+(p.used?' used':'');slot.dataset.index=i;
+  if(!p.used){
+   const rows=Math.max(...p.shape.map(v=>v[0]))+1,cols=Math.max(...p.shape.map(v=>v[1]))+1;
+   const shape=document.createElement('div');shape.className='shape';shape.style.gridTemplateColumns='repeat('+cols+',clamp(13px,4.5vw,20px))';
+   for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const block=document.createElement('span');block.className='mini';
+    if(p.shape.some(v=>v[0]===r&&v[1]===c))block.style.background=p.color;
+    shape.appendChild(block);
+   }
+   slot.appendChild(shape);
+  }
+  piecesEl.appendChild(slot);
+ });
+ scoreEl.textContent=score;bestEl.textContent=best;
+}
+function fits(shape,r,c){return shape.every(([dr,dc])=>r+dr>=0&&r+dr<SIZE&&c+dc>=0&&c+dc<SIZE&&!grid[r+dr][c+dc])}
+function clearPreview(){boardEl.querySelectorAll('.cell').forEach(cell=>cell.classList.remove('preview-good','preview-bad'))}
+function showPreview(r,c){
+ clearPreview();if(!drag)return;const good=fits(drag.shape,r,c);
+ drag.shape.forEach(([dr,dc])=>{const rr=r+dr,cc=c+dc;if(rr>=0&&rr<SIZE&&cc>=0&&cc<SIZE)boardEl.children[rr*SIZE+cc].classList.add(good?'preview-good':'preview-bad')});
+ drag.target={r,c,good};
+}
+function makeGhost(piece){
+ ghostGrid.innerHTML='';const rows=Math.max(...piece.shape.map(v=>v[0]))+1,cols=Math.max(...piece.shape.map(v=>v[1]))+1;
+ ghostGrid.style.gridTemplateColumns='repeat('+cols+',clamp(20px,6vw,28px))';
+ for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+  const block=document.createElement('span');block.className='ghost-cell';
+  if(piece.shape.some(v=>v[0]===r&&v[1]===c))block.style.background=piece.color;else block.style.background='transparent';
+  ghostGrid.appendChild(block);
+ }
+}
+function moveGhost(x,y){
+ const w=ghost.offsetWidth,h=ghost.offsetHeight;
+ ghost.style.left=Math.max(4,Math.min(innerWidth-w-4,x-w/2))+'px';
+ ghost.style.top=Math.max(4,Math.min(innerHeight-h-4,y-h/2-65))+'px';
+}
+function targetFromPoint(x,y){
+ const el=document.elementFromPoint(x,y),cell=el&&el.closest('.cell');
+ if(!cell||!boardEl.contains(cell))return null;
+ return{r:Number(cell.dataset.r),c:Number(cell.dataset.c)};
+}
+function startDrag(e){
+ if(ended||drag)return;const slot=e.target.closest('.slot');if(!slot)return;
+ const index=Number(slot.dataset.index),piece=pieces[index];if(!piece||piece.used)return;
+ e.preventDefault();selected=index;drag={index,shape:piece.shape,color:piece.color,pointerId:e.pointerId,target:null};
+ makeGhost(piece);ghost.style.display='block';moveGhost(e.clientX,e.clientY);render();
+}
+function moveDrag(e){
+ if(!drag||e.pointerId!==drag.pointerId)return;e.preventDefault();moveGhost(e.clientX,e.clientY);
+ const target=targetFromPoint(e.clientX,e.clientY);
+ if(target)showPreview(target.r,target.c);else{clearPreview();drag.target=null}
+}
+function endDrag(e){
+ if(!drag||e.pointerId!==drag.pointerId)return;e.preventDefault();
+ const target=targetFromPoint(e.clientX,e.clientY),index=drag.index,shape=drag.shape;
+ const valid=target&&fits(shape,target.r,target.c);
+ ghost.style.display='none';clearPreview();drag=null;
+ if(valid){selected=index;place(target.r,target.c)}
+ else{selected=-1;message.textContent='Перетащи фигуру на свободные клетки';render()}
+}
+function cancelDrag(){drag=null;ghost.style.display='none';clearPreview()}
+piecesEl.addEventListener('pointerdown',startDrag);
+document.addEventListener('pointermove',moveDrag,{passive:false});
+document.addEventListener('pointerup',endDrag,{passive:false});
+document.addEventListener('pointercancel',()=>{if(drag){cancelDrag();selected=-1;render()}});
+function place(r,c){
+ if(ended||selected<0)return;const p=pieces[selected];
+ if(!p||p.used||!fits(p.shape,r,c)){selected=-1;render();return}
+ p.shape.forEach(([dr,dc])=>grid[r+dr][c+dc]=p.color);score+=p.shape.length;
+ const fullRows=[],fullCols=[];
+ for(let rr=0;rr<SIZE;rr++)if(grid[rr].every(Boolean))fullRows.push(rr);
+ for(let cc=0;cc<SIZE;cc++)if(grid.every(row=>row[cc]))fullCols.push(cc);
+ const clear=new Set();
+ fullRows.forEach(rr=>{for(let cc=0;cc<SIZE;cc++)clear.add(rr*SIZE+cc)});
+ fullCols.forEach(cc=>{for(let rr=0;rr<SIZE;rr++)clear.add(rr*SIZE+cc)});
+ clear.forEach(i=>grid[Math.floor(i/SIZE)][i%SIZE]='');
+ if(clear.size){score+=clear.size*2;message.textContent='Отлично! Очищено клеток: '+clear.size}
+ else message.textContent='+'+p.shape.length+' очков';
+ p.used=true;selected=-1;
+ if(score>best){best=score;try{localStorage.setItem('blockVibeBest',String(best))}catch(e){}}
+ if(pieces.every(p=>p.used))pieces=[randomPiece(),randomPiece(),randomPiece()];
+ render();if(!hasMove())gameOver();
+}
+function hasMove(){return pieces.some(p=>!p.used&&grid.some((row,r)=>row.some((_,c)=>fits(p.shape,r,c))))}
+function gameOver(){
+ ended=true;document.getElementById('modalTitle').textContent='Игра окончена!';
+ document.getElementById('modalText').textContent='Твой результат: '+score+' очков. Рекорд: '+best+'.';
+ document.getElementById('again').textContent='Играть снова';document.getElementById('overlay').classList.add('show');
+}
+document.getElementById('restart').addEventListener('click',newGame);
+document.getElementById('again').addEventListener('click',newGame);
+document.getElementById('rules').addEventListener('click',()=>{
+ document.getElementById('modalTitle').textContent='Как играть';
+ document.getElementById('modalText').textContent='Зажми фигуру внизу, перетащи её на поле и отпусти. Зелёная подсветка означает, что фигуру можно поставить. Заполняй строки и столбцы, чтобы очищать блоки.';
+ document.getElementById('again').textContent='Понятно';document.getElementById('overlay').classList.add('show');
+});
+newGame();
+})();
+</script>
+</body>
+</html>
